@@ -1,0 +1,491 @@
+---
+title: "Tree Notebook"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. The code is placed in "chunks" to allow clear delimination between text and code. When you execute code within the notebook, the results appear beneath the code. To execute a chunk, click the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Last class we talked about Jupyter Notebooks. R notebooks are very similar. You actually can run R in Jupyter notebooks. You can do your full assignment in this notebook. Then, please save it as an HTML file and you are done.
+
+In this assignment, you will learn about the various Tree based models that we covered in the past few weeks. As mentioned, Tree based models are a type of Machine Learning. They come to us from the field of computer science. They have some nice advantages:
+
+*They provide a (usually) simple and easy to interpret display of the results that mimics human decision making (think decision trees)
+*They are quite adept at detecting the optimum break points for nonlinear variables (such as age  in the Titanic example)
+*They are inherantly good at picking up multi layered "dependencies" that we call interaction terms.
+*Though the original tree is usually not very predictive, when trees are combined with boosting, bagging and decorrelation techniques they often are a top performing technique. 
+
+We are now in the world of predictive modelling. Our focus now is brute force prediction. In this world, even minor seeming improvements in predictive accuracy are important: they can translate into lives saved, millions earned, careers transformed. Every decimal counts for the person at the margin..
+
+We will use the Titanic data because you are now familar with it. We are going to see if we can outdo the logistic regression results. So we will start with logistic regression as our base model. But this is no "strawman." Logistic regression is a powerful technique that can often rise to the top. This method can be used for any problems that logistic regression takes on. You can use this method to predict any binary outcome. 
+
+So lets get started. First, lets load the required libraries. To run this code, press the little arrow in the upper right corner. We'll load some tree packages as well as the caret package which is commonly used for cross validation 
+
+```{r, eval=FALSE, include=FALSE}
+install.packages('tree')
+install.packages('randomForest')
+install.packages('caret')
+install.packages('e1071')
+install.packages('Rcpp')
+install.packages('pROC')
+```
+
+```{r}
+library(Rcpp)
+library(tree)
+library(randomForest)
+library(e1071)
+library(caret)
+library(pROC)
+```
+
+Now lets fire up a logistic regression model. The following code block will produce a decent example from the titanic example. Be careful to set the proper directory where you saved the titanic data on line *62*
+
+```{r}
+logisticPseudoR2s <- function(LogModel) {
+  dev <- LogModel$deviance
+  nullDev <- LogModel$null.deviance
+  modelN <- length(LogModel$fitted.values)
+  R.l <- 1 - dev / nullDev
+  R.cs <- 1 - exp ( -(nullDev - dev) / modelN)
+  R.n <- R.cs / (1 - ( exp (-(nullDev / modelN))))
+  cat("Pseudo R^2 for Logistic Regression\n")
+  cat("Hotitanicer and Lemeshow R^2 ", round(R.l, 3), "\n")
+  cat("Cox and Snell R^2       ", round(R.cs, 3), "\n")
+  cat("Nagelkerke R^2          ", round(R.n, 3),     "\n")
+}
+
+# Remove scientific notation
+options(scipen=999)
+
+# First, as always, set your working directory. 
+# setwd("c:/data")
+
+# Next, load the data. This can be one of two ways, manually, or running the following code. 
+# Note: the following line of code only works if the file is located in your working directory. 
+train_set <- read.csv("train_set.csv")
+
+# Let's remove NA's, as we have prior. 
+titanic <- train_set
+titanic <- na.omit(titanic)
+attach(titanic)
+
+# Your data is loaded. 
+# View(titanic)
+
+# Let's create an object, "Survived_value" and merge it into our dataset. 
+Survived_value = ifelse(Survived == 0, "No", "Yes")
+titanic = data.frame(titanic, Survived_value)
+# Your "titanic" data should include this "Survived_value" now. 
+
+# LOGISTIC MODEL -------------------------
+
+# Let's reference how we completed this in the last assignment. Take a look at the below model. 
+# This model checks for a small child, a female, and the fare paid. 
+
+titanic$youngchild[titanic$Age <= 12] <- 1 ; titanic$youngchild[titanic$Age > 12] <- 0;
+titanic$female[titanic$Sex == "male"] <- 0 ; titanic$female[titanic$Sex == "female"] <- 1;
+
+# (1) Create Model
+
+titanic_final <- glm(Survived ~ female + youngchild + Fare, family=binomial, data=titanic)
+summary(titanic_final)
+
+# (2) Run Diagnostics
+
+exp(coef(titanic_final))
+logisticPseudoR2s(titanic_final)
+
+# (3) Insert model probability into our dataset
+
+prob_final = predict(titanic_final,type="response")
+titanic$prob_final <- prob_final
+
+quantile(titanic$prob_final)
+
+# (4) Predict "Survived" or "Died" based on model
+
+pred_final = rep("No", 564) # Creates a vector of 564 "Died" elements
+pred_final[titanic$prob_final>0.5] = "Yes" # Changes the "Died" elements to "Survived" if probability is above 0.5
+pred_final[1:40]
+titanic$pred_final <- pred_final
+
+table(titanic$pred_final)
+table(pred_final,titanic$Survived_value) # Confusion table that compares our prediction to the Survived that was reality
+
+# Accuracy
+table <- table(pred_final,titanic$Survived_value)
+Accuracy <- sum(diag(table)/sum(table))
+print(paste('Accuracy: ', Accuracy))
+
+# Calculate AUC and plot ROC curve
+prob_log = predict(titanic_final, type ='response')
+auc(titanic$Survived, prob_log)
+plot(roc(titanic$Survived, prob_log))
+
+```
+
+*In this space below (before the next code block), report the accuracy of this model and the area under the curve. These are two different criteria. Explain what they tell you. This will be your baseline that we'll try to improve with the tree models. Also, please describe the coeffecients in the model (what significant and what is the nature of the relationships?)
+
+
+
+
+
+
+
+
+
+
+
+
+Insert Answer in the space above. Then, lets now move on to the next step. We will build a simple "starter" tree.
+
+```{r}
+
+# TREE GROWTH -------------------------
+
+# (1) Starter Tree 
+# Let's create a tree using all our data to get our feet wet. 
+# This tree will not be tested, since we are leveraging all our data to create it.
+
+starter_tree = tree( Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, titanic)
+summary(starter_tree)
+
+# How many terminal nodes does this tree have? What does the misclassification error mean?
+
+plot(starter_tree)
+text(starter_tree, pretty=0)
+starter_tree
+```
+
+Using the lecture notes and the text, please explain what just happened. How does the tree work? How is it deciding which variables to split on and where to split. Please explain what is happening statistically. What is the significance (if any) of "sex" being the first split variable? For two of the leaves, describe the pathway of who ended up in the leaf. Open the output above in the "R console" view. Try to figure out how to interpret it. Which terminal node had the highest survival rate? Does it make sense based on what you know about the data? Which terminal node had the lowest survival rate? 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Answer the question in the space above. 
+
+One of the flaws of the "entry level" decision tree is that they tend to "overfit" the data. At an extreme, they can memorize your dataset. In order to properly evaluate the performance of a classification tree on these data, we must estimate the test error rather than simply computing the training error.
+
+To do that, we need to...
+ (1) split observations into a training set and test set, 
+ (2) build the tree using the training set
+ (3) evaluate its performance on the test data.
+
+These steps play out below. As usual, we'll set a "seed" value. This is a way of drawing a random sample but ensuring that we get the same result every time. We do that so that we can replicate our results. We will define a train sample, where we will build our tree. But, critically, we will test the tree on a "fresh" test sample. This is the fundamental takeway from "out of sample prediction" which is one of key key contributions of modern data science. So we'll pull a sample of 200 in the training sample. The remainder will be in the test sample. 
+```{r}
+# Split test/train
+set.seed(2)
+train = sample(1:nrow(titanic), 200)
+test = titanic[-train,]
+survived_test = Survived_value[-train]
+```
+
+How many people are in the test sample? Does that make sense??
+
+
+
+
+Answer above
+
+Now lets look at the performance of this tree on "fresh" test data.
+
+```{r}
+# Create tree from training data (subset = 'train')
+tree_train = tree( Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = titanic, subset = train)
+summary(tree_train)
+plot(tree_train)
+text(tree_train)
+
+# Evaluate performance on new data ('test')
+train_pred = predict(tree_train, test, type="class")
+confusionMatrix(train_pred, test$Survived_value)
+```
+
+Now, comment on the overall accuracy of this starter tree? How does it compare to the logistic regression? Comment on some of the other diagnostics. What does the "sensitivity" mean? What about "specificity"? Google to remind your self what these terms mean. See https://www.theanalysisfactor.com/sensitivity-and-specificity/ or
+https://www.med.emory.edu/EMAC/curriculum/diagnosis/sensand.htm
+
+
+
+
+
+
+
+Answer above
+
+
+Notice the tree that was produced above. There are many branches and leaves. This is what we'd call a "bushy" tree. It is likely still overfitting the data. Let us therefore "prune" the tree to get a more reliable results
+Although you may think more nodes is better, that often means overfitting, leading to poor test performance.
+A smaller tree with fewer splits could lead to better test results. This is achieved by pruning the tree.
+
+```{r}
+# PRUNING -------------------------
+
+# cross validation will help us determine if pruning will improve importance (optimal level of tree complexity)
+set.seed(3)
+cv_titanic = cv.tree(tree_train,FUN=prune.misclass)
+cv_titanic
+
+# plot results to see the dev (cross-validation error rate) as a function of size and k
+
+plot(cv_titanic)
+
+par(mfrow=c(1,2))
+plot(cv_titanic$size,cv_titanic$dev, type='b')
+plot(cv_titanic$k,cv_titanic$dev,type='b')
+
+# We want to know which number of nodes results in the lowest cross-validation error rate
+# now that we see that is 5, lets prune the tree to obtain a five-node tree
+
+pruned_tree = prune.misclass(tree_train, best=5)
+summary(pruned_tree)
+dev.off()
+plot(pruned_tree)
+text(pruned_tree,pretty=0)
+
+# How does our pruned tree look different than our trained tree? Let's plot them side by side
+
+par(mfrow=c(1,2))
+plot(tree_train); text(tree_train, pretty=0)
+plot(pruned_tree); text(pruned_tree,pretty=0)
+
+# test this pruned tree on the test data set
+
+prune_pred = predict(pruned_tree, test, type='class')
+confusionMatrix(prune_pred, test$Survived_value)
+```
+Did the pruning improve the error? How about the accuracy? Looking at your text, the notes or the web explain some of the pruning options that we choose above and explain how pruning works. 
+
+
+
+
+
+Answer above.
+
+
+So far we've seen only minor improvements. The concepts of bagging, boosting and random forests are designed to turn trees from mediocre predictors into top rate algorithms. 
+
+# BAGGING ------------------------- 
+Bagging is our introduction to the concept of random forests. 
+To apply bagging to regression trees, we bootstrap the training sets and average the resulting predictions.
+The code looks very similar to random forests, but we set mtry to the number of actual predictors, instead of a subest.
+
+```{r}
+set.seed(1)
+bag_titanic = randomForest(Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = titanic, subset = train, mtry=7, importance=TRUE)
+bag_titanic
+# What do you interpret from the OOB estimate of error rate? How about the classification error?
+
+# Let's make predictions with the test set of data.
+pred_bag = predict(bag_titanic, newdata = test)
+confusionMatrix(pred_bag, test$Survived_value)
+#dev.off(); 
+plot(pred_bag, test$Survived_value)
+
+# Accuracy
+table <- table(pred_bag,test$Survived_value)
+Accuracy <- sum(diag(table)/sum(table))
+print(paste('Accuracy: ', Accuracy))
+
+# Plotting ROC curve
+prob_bag = predict(bag_titanic, newdata = test, type ='prob')
+auc(test$Survived, prob_bag[,2])
+plot(roc(test$Survived, prob_bag[,2]))
+
+# Did bagging improve the accuracy?
+```
+Did bagging improve the accuracy?
+
+
+
+
+
+Answer above
+
+To really get a boost, we will run a random forest. The key insight of random forests is similar to the key insight of portfolio diversification theory in finance. By "decorrelating" the decision trees we have a better chance of having a better solution. To accomplish this, random forests combining bagging (that is running lots of trees on bootstrap samples) with a decorrelation. At each branch, a typical random forest will only consider the square root of the variable set. For example, if you have 36 predictors, at each node, the procedure will consider only 6 of the variables for the optimal split. Lets see how this goes:
+
+```{r}
+# RANDOM FOREST ------------------------- 
+# Now we will limit the number of predictors allowed using mtry
+# Let's set it to 2 predictors and examine our results. 
+
+rf_titanic = randomForest(Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data= titanic, subset = train, mtry=2, importance=TRUE)
+rf_titanic
+# What do you interpret from the OOB estimate of error rate? How about the classification error?
+
+# Let's make predictions with the test set of data.
+pred_rf = predict(rf_titanic, newdata = test)
+confusionMatrix(pred_rf, test$Survived_value)
+plot(pred_rf, test$Survived_value)
+
+# Accuracy
+table <- table(pred_rf,test$Survived_value)
+Accuracy <- sum(diag(table)/sum(table))
+print(paste('Accuracy: ', Accuracy))
+
+# Plotting ROC curve
+prob_rf = predict(rf_titanic, newdata = test, type ='prob')
+auc(test$Survived, prob_rf[,2])
+plot(roc(test$Survived, prob_rf[,2]))
+```
+
+Did the accuracy improve?? Please explain how bagging, boosting and random forests improve prediction. Use the text and your notes to explain.
+
+
+
+
+Answer above.
+
+
+We are now into the world of "black box" machine learning algorithms. We get a good prediction, but we are now using hundreds of trees on random subsets of variables to get this improvement. This is the price we pay for better predictions, but it is a big deal. Again, better predictions means fewer children with lead poisoning, fewer people unjustifiably incarcerated or misdiagnosed. But random forests do come with a nice tool for understanding what is driving the predictions. This is called the variable importance measure. We'll run it below. 
+
+```{r}
+# Examine the importance of each variable. What is your analysis?
+importance(rf_titanic)
+varImpPlot(rf_titanic)
+```
+
+Interpret the output above. Any surprises? Do the results seem intutitive? using the book as a guide, explain how the variable importance statisics are derived.
+
+
+
+
+
+Answer above. 
+
+
+
+# ADVANCED EXTENSIONS ------------------------- 
+
+(1) change the # of trees using ntree. First run with 2 trees, then with 25, then with 2500 trees then with 250,000 trees (this will take a few minutes to run depending on the power of your system). What happens to the accuracy at each step?
+
+
+
+
+
+Report your findings above.
+```{r}
+bag_titanic = randomForest(Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data=titanic, subset = train, mtry=7, ntree=250000)
+pred_bag = predict(bag_titanic, newdata = test)
+confusionMatrix(pred_bag, test$Survived_value)
+#dev.off(); 
+plot(pred_bag, test$Survived_value)
+```
+
+(2) visualize the plots using rattle. The rattle plot is a state of the art visualization of trees. It is very nice but hard to run. Note: this will NOT WORK if you have the latest version of Mac. There are additional downloads required. Please email me (Ellie) if you would like to pursue this.
+
+
+
+
+
+
+In the space above, describe the output from the rattle plot. 
+
+```{r, eval=FALSE, include=FALSE}
+install.packages('rpart')
+install.packages('rattle')
+install.packages('RColorBrewer')
+```
+
+```{r, eval=FALSE, include=FALSE}
+library(rpart)
+library(rattle)
+library(RColorBrewer)
+
+rattle_tree = rpart( Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = titanic, method = 'class')
+fancyRpartPlot(rattle_tree)
+
+#note!!!!!!!!!!! If you installed the rattle package, uninstall it now if you want to run the options below
+#otherwise, importance won't work!
+
+```
+
+(3) Change the number of predictors allowed in the random forest growth. Report on whether it changed the prediction accuracy. First use Mtry=4, then 6. Note, if you did the rattle plot above you need to now unintall the rattle package. Why do you think the accuracy is actually better when you try fewer variables? (think about the concept of decorrelation)
+
+
+
+
+
+
+
+Report on your results above
+
+```{r}
+# How are the results different when mtry is 4?
+rf_titanic_4 = randomForest(Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data= titanic, subset = train, mtry=4, importance=TRUE)
+rf_titanic_4
+pred_rf_4 = predict(rf_titanic_4, newdata = test)
+confusionMatrix(pred_rf_4, test$Survived_value)
+
+table <- table(pred_rf_4,test$Survived_value)
+Accuracy <- sum(diag(table)/sum(table))
+print(paste('Accuracy: ', Accuracy))
+
+importance(rf_titanic_4)
+varImpPlot(rf_titanic_4)
+
+# How are the results different when mtry is 6?
+rf_titanic_6 = randomForest(Survived_value ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data= titanic, subset = train, mtry=6, importance=TRUE)
+rf_titanic_6
+pred_rf_6 = predict(rf_titanic_6, newdata = test)
+confusionMatrix(pred_rf_6, test$Survived_value)
+
+table <- table(pred_rf_6,test$Survived_value)
+Accuracy <- sum(diag(table)/sum(table))
+print(paste('Accuracy: ', Accuracy))
+
+importance(rf_titanic_6)
+varImpPlot(rf_titanic_6)
+```
+
+We will now try an advanced method called boosting. This is a sequential process where the model slowly "hones in" on cases that it is having trouble predicting. Look at the notes and the text and first note if boosting improved things and then explain a little more about how it works. Interpret all of the output.
+
+
+
+
+
+Summarize above.
+
+```{r}
+
+# (4) Boosting
+
+# install.packages('gbm')
+library(gbm)
+set.seed(1)
+boost_titanic = gbm(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data= titanic[train,], distribution = "bernoulli", interaction.depth = 3, n.minobsinnode = 10, n.trees = 5000, shrinkage = 0.001, train.fraction = 0.8)
+summary(boost_titanic)
+# boost_titanic
+
+prob_boost <- predict(boost_titanic, data= titanic[train,], n.trees = 5000, type = "response") 
+# prob_boost
+
+par(mfrow=c(1,2))
+plot(boost_titanic, i='Age')
+plot(boost_titanic, i='Fare')
+
+survived_results <- rep('No', 404)
+survived_results[test$Survived_value =='Yes'] = 'Yes'
+survived_results
+pred_boost = rep('No', 404)
+pred_boost[prob_boost>0.5] = 'Yes'
+# pred_boost
+
+table(pred_boost, survived_results)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
