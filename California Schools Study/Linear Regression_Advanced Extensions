@@ -1,0 +1,145 @@
+#### Advanced Extensions (please try at least one of these) #####
+
+# The below code are options for extension on the existing lab. These are outlined in the assignment. 
+# These can only be completed once you have finished the intial assignment in R. 
+
+# 1. Visualization Extensions 
+
+# Let's visualize the correlation table like we did in Lab 2. 
+
+corrmatrix <- cor(calschool, use = "complete.obs")
+
+corrplot.mixed(corrmatrix, number.cex = 0.8, tl.cex = 0.6)
+# number.cex changes the size of the number fonts. tl.cex changes the size of the labels
+
+# There are more iterations of this same graph as well. Is any version particularly clear to you?
+
+corrplot(corrmatrix, method="circle") 
+
+corrplot(corrmatrix, type="lower")
+
+# What if we want to format our regression results? We will need to install some new packages. Do this one by one to ensure they download completely before installing the next package:
+
+install.packages("stargazer")
+install.packages("lmtest")
+install.packages("sjPlot")
+
+library(stargazer)
+library(lmtest)
+library(sjPlot)
+
+# Stargazer will print two regression outputs results side by side in the console.
+
+stargazer(regression_1, regression_final, title="Regression Results", dep.var.labels=c("Academic Performance"), type="text")
+
+# sjPlot will format our regression details in a table including updated language for the variables, headers, and other customizable options. These will appear in the "viewer" tab. 
+
+# To start, this is the first regression model (first model that only has one independent variable) output using the `sjPlot` package.
+
+sjt.lm(regression_1, 
+       show.header = TRUE,
+       p.numeric = FALSE,
+       show.se = TRUE,
+       show.fstat = TRUE, 
+       string.est = "Estimate",
+       string.ci = "Conf. Int.",
+       string.dv = "Unadjusted Regression Model",
+       depvar.labels = c("Academic Performance"),
+       pred.labels = c("Percent of students receiving free meals"))
+
+# This is the final regression model output using the `sjPlot` package.
+
+sjt.lm(regression_final, 
+       show.header = TRUE,
+       p.numeric = FALSE,
+       show.se = TRUE,
+       digits.se = 3,
+       show.fstat = TRUE, 
+       string.est = "Estimate",
+       string.ci = "Conf. Int.",
+       string.dv = "Adjusted Regression Model",
+       depvar.labels = c("Academic Performance"),
+       pred.labels = c("% Free Meals", "% English learners",
+                       "% teachers with full credentials"))
+
+# We can also use sjPlot to compare two regression models
+
+sjt.lm(regression_1, regression_final, 
+       show.header = TRUE,
+       p.numeric = FALSE,
+       show.se = TRUE,
+       digits.se = 3,
+       show.fstat = TRUE, 
+       group.pred = FALSE,
+       string.est = "Estimate",
+       string.ci = "Conf. Int.",
+       string.dv = "Regression Results",
+       depvar.labels = c("First Regression Model", "Final Regression Model"),
+       pred.labels = c("% Free Meals", "% English Learners",
+                       "% teachers with full credentials"))
+
+# While the scatterplots we completed in the lab are helpful, sometimes you'll want to view the same scatterplot with color breakdowns for a third variable. In this example, we'll view the same scatterplot created earlier (acadperf vs meals) and use the categorical variable we create in extension 4 (ell_cat) to change the color of the point. 
+# IMPORTANT NOTE: this only works if you've created the variable ell_cat in EXTENSION 4. 
+
+palette(c("grey","blue"))
+with(calschool, plot(acadperf, meals, pch=19, col=ell_cat, cex=0.6))
+
+# What does this result imply?   
+
+# 2. Additional Diagnostics
+
+# A quick and effective test to compare two models is the analysis of variance function. Give it a try with two of your regression fits to help you find the best regression model:
+
+anova(regression_1, regression_final)
+
+# We could also report the confidence interval of this regression. That can be done using the confint() function. 
+
+confint(regression_final)
+
+# We can also use SSE (the sum of squared errors / residuals) and RMSE (root means squared error) to see whether the regression line / model is a good fit.
+# Compute the SSE and RMSE for final model and see how it changes from the first model. Does it get smaller?
+
+SSE_1 = sum(regression_1$residuals^2)
+SSE_1
+
+RMSE_1 = sqrt(SSE_1/nrow(calschool)) 
+RMSE_1 
+
+SSE_f = sum(regression_final$residuals^2)
+SSE_f
+RMSE_f = sqrt(SSE_f/nrow(calschool))
+RMSE_f
+
+# 3. Explore the use of logarithms of the dependent variable. We'll add a column to our dataset called "log_acadperf" and then run regression using the log as the dependent variable instead of acadperf. Be sure to replace "meals" with your variables from your final regression. 
+
+calschool$log_acadperf <- log(calschool$acadperf)
+regression_log <- lm(log_acadperf ~ meals, data = calschool)
+summary(regression_log)
+
+# 4. Convert a continuous variable into a nominal / ordinal variables. In class, we learned the different type of variables. What if we wanted to convert a continuous variable into categorical variables?
+# In this example, we determine the value of ell at 75% (3rd quantile). This will be our cutoff.
+
+quantile(calschool$ell, 0.75, na.rm = TRUE) 
+
+# Then we use that number (50.25) as a cutoff for our dummy variable. The resulting new category (ell_cat) will be a dummy variable: 0 if the value is less than 50.25, or 1 if it is above.
+# It is best to do all these lines one by one. I've received a warning "Unknown or uninitialised column", but my regression still worked, so keep going. 
+
+calschool$ell_cat[calschool$ell < 50] <- 0
+calschool$ell_cat[calschool$ell >= 50] <- 1 
+calschool$ell_cat <- factor(calschool$ell_cat) 
+
+# Create a dummy variable for mealcat. In the data set, there are 3 values for mealcat. What if we wanted to turn each of those 3 values into its own dummy variable?
+
+calschool$high_mealcat <- ifelse(calschool$mealcat == 3, 1, 0)
+calschool$med_mealcat <- ifelse(calschool$mealcat == 2, 1, 0)
+calschool$low_mealcat <- ifelse(calschool$mealcat == 1, 1, 0)
+
+# Take a look at the table calschool -- you can see the categorical and dummy variables on the far right. 
+
+View(calschool)
+
+# 5. Create an interaction variable of dummy variables, just multiply these two dummy variable's together: ell_cat*high_mealcat. This will compare ell_cat, high_mealcat, and the interaction ell_cat:high_mealcat.
+
+regression_interaction_high <- lm(acadperf ~ ell_cat*high_mealcat, data = calschool)
+summary(regression_interaction_high)   
+
